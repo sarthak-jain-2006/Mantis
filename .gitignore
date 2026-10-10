@@ -1,0 +1,25 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Mantis runtime data (per-task working copies, logs)
+workspaces/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
