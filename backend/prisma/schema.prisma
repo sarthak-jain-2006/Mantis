@@ -1,0 +1,51 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Every state a task can be in. See the design doc's task lifecycle.
+enum TaskStatus {
+  QUEUED
+  RUNNING
+  TESTING
+  REVIEWING
+  AWAITING_APPROVAL
+  WAITING_FOR_INPUT
+  COMPLETED
+  FAILED
+  REJECTED
+  CANCELLED
+}
+
+model Project {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String
+  repoPath    String   @map("repo_path")
+  testCommand String   @default("pytest -q") @map("test_command")
+  createdAt   DateTime @default(now()) @map("created_at")
+  tasks       Task[]
+
+  @@map("projects")
+}
+
+model Task {
+  id         String     @id @default(uuid()) @db.Uuid
+  // Optional until project selection lands in Phase 3.
+  projectId  String?    @map("project_id") @db.Uuid
+  project    Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  request    String
+  status     TaskStatus @default(QUEUED)
+  result     Json?
+  error      String?
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+  finishedAt DateTime?  @map("finished_at")
+
+  @@index([projectId])
+  @@index([createdAt])
+  @@map("tasks")
+}
