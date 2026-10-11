@@ -7,7 +7,7 @@ An AI software engineer: it plans a change to a Python repository, edits the cod
 ## Architecture
 
 ```
-Browser (React :5173) → Node backend (Fastify :3000) → Python AI service (FastAPI :8000)
+Browser (React :5173) → Node backend (Express) → Python AI service (FastAPI :8000)
                                  ↓
                      PostgreSQL + pgvector (Docker :5433)
 ```
@@ -15,7 +15,7 @@ Browser (React :5173) → Node backend (Fastify :3000) → Python AI service (Fa
 | Folder | What it is |
 | --- | --- |
 | `frontend/` | React + TypeScript + Vite + Tailwind dashboard |
-| `backend/` | Node.js + TypeScript + Fastify + Prisma API |
+| `backend/` | Node.js + TypeScript + Express + Prisma API |
 | `ai-service/` | Python + FastAPI (+ LangGraph from Phase 2) |
 
 ## Prerequisites
