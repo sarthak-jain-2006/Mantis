@@ -26,8 +26,9 @@ export function taskRouter({ prisma, aiService }: AppDeps): Router {
 
     try {
       const run = await aiService.startRun(task.id, task.request);
-      // Phase 1: the AI service only acknowledges the task. From Phase 4 the
-      // agent graph reports real progress and moves the task through its states.
+      // Phase 2: the AI service returns a plan, saved as the task's result. Nothing runs
+      // after planning yet; from Phase 4 the agent graph carries on from here and moves
+      // the task through its states. This request waits for the plan (a few seconds).
       const updated = await prisma.task.update({
         where: { id: task.id },
         data: { status: "RUNNING", result: run },

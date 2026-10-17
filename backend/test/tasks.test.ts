@@ -14,7 +14,18 @@ const fakeAi: FakeAiService = {
   fail: false,
   async startRun(taskId: string, userRequest: string) {
     if (this.fail) throw new AiServiceError("AI service unreachable: connection refused");
-    return { task_id: taskId, status: "received" as const, message: `AI service received: ${userRequest}` };
+    return {
+      task_id: taskId,
+      status: "planned" as const,
+      plan: {
+        summary: `Plan for: ${userRequest}`,
+        subtasks: ["Find the endpoint", "Add the parameters", "Write tests"],
+        acceptance_criteria: ["Existing tests still pass"],
+        constraints: [],
+        needs_research: false,
+      },
+      model: "fake-model",
+    };
   },
   async isHealthy() {
     return this.healthy;
@@ -38,17 +49,19 @@ afterAll(async () => {
 });
 
 describe("POST /api/tasks", () => {
-  it("saves the task and records the AI service reply", async () => {
+  it("saves the task and stores the plan from the AI service", async () => {
     fakeAi.fail = false;
     const res = await request(app).post("/api/tasks").send({ request: "Add pagination" });
     createdIds.push(res.body.id);
 
     expect(res.status).toBe(201);
     expect(res.body.status).toBe("RUNNING");
-    expect(res.body.result.message).toBe("AI service received: Add pagination");
+    expect(res.body.result.plan.summary).toBe("Plan for: Add pagination");
+    expect(res.body.result.model).toBe("fake-model");
 
     const fromDb = await prisma.task.findUnique({ where: { id: res.body.id } });
     expect(fromDb?.request).toBe("Add pagination");
+    expect(fromDb?.result).toMatchObject({ plan: { subtasks: ["Find the endpoint", "Add the parameters", "Write tests"] } });
   });
 
   it("marks the task FAILED when the AI service is down", async () => {
