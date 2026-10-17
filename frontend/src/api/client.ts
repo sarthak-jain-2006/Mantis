@@ -12,13 +12,22 @@ export type TaskStatus =
   | "REJECTED"
   | "CANCELLED";
 
+// The Planner's output. Mirrors ImplementationPlan in ai-service/schemas.py.
+export interface Plan {
+  summary: string;
+  subtasks: string[];
+  acceptance_criteria: string[];
+  constraints: string[];
+  needs_research: boolean;
+}
+
 export interface Task {
   id: string;
   projectId: string | null;
   request: string;
   status: TaskStatus;
-  // Phase 1: the AI service's acknowledgement. Richer results arrive with the agent graph.
-  result: { message?: string } | null;
+  // Phase 2: the plan and the model that wrote it. Tasks saved in Phase 1 hold { message } instead.
+  result: { plan?: Plan; model?: string; message?: string } | null;
   error: string | null;
   createdAt: string;
   updatedAt: string;

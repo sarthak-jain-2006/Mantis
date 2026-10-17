@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Task } from "./api/client";
+import type { Plan, Task } from "./api/client";
 import App from "./App";
 
 // The backend is faked at the fetch level, so these tests cover the UI and the API client together.
@@ -84,15 +84,23 @@ describe("health", () => {
   });
 });
 
+const PLAN: Plan = {
+  summary: "Add limit/offset pagination to the products endpoint.",
+  subtasks: ["Find the products endpoint", "Add limit and offset parameters", "Write tests for the bounds"],
+  acceptance_criteria: ["Existing tests still pass"],
+  constraints: [],
+  needs_research: false,
+};
+
 describe("tasks", () => {
-  it("submits a task and shows the AI service's reply", async () => {
+  it("submits a task and shows the plan", async () => {
     const tasks: Task[] = [];
     const fetchMock = fakeBackend({
       "GET /api/health": healthy,
       "GET /api/tasks": () => json(tasks),
       "POST /api/tasks": (init) => {
         const { request } = JSON.parse(String(init?.body)) as { request: string };
-        const task = makeTask({ request, result: { message: `AI service received: ${request}` } });
+        const task = makeTask({ request, result: { plan: PLAN, model: "gemini-flash-latest" } });
         tasks.unshift(task);
         return json(task, 201);
       },
@@ -103,10 +111,42 @@ describe("tasks", () => {
     await userEvent.type(screen.getByLabelText("What should Mantis do?"), "Add pagination");
     await userEvent.click(screen.getByRole("button", { name: "Submit task" }));
 
-    expect(await screen.findByText("AI service received: Add pagination")).toBeInTheDocument();
+    expect(await screen.findByText(`Plan: ${PLAN.summary}`)).toBeInTheDocument();
+    const steps = within(screen.getByRole("list", { name: "Steps" })).getAllByRole("listitem");
+    expect(steps.map((li) => li.textContent)).toEqual(PLAN.subtasks);
+    expect(within(screen.getByRole("list", { name: "Done when" })).getByText("Existing tests still pass")).toBeInTheDocument();
+    // An empty list is left out rather than shown as an empty heading.
+    expect(screen.queryByRole("list", { name: "Must not break" })).not.toBeInTheDocument();
+    expect(screen.getByText(/planned by gemini-flash-latest/)).toBeInTheDocument();
     expect(screen.getByText("RUNNING")).toBeInTheDocument();
     expect(screen.getByLabelText("What should Mantis do?")).toHaveValue("");
     expect(fetchMock).toHaveBeenCalledWith("/api/tasks", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("still shows tasks saved before plans existed", async () => {
+    fakeBackend({
+      "GET /api/health": healthy,
+      "GET /api/tasks": () => json([makeTask({ result: { message: "AI service received: Add pagination" } })]),
+    });
+    renderApp();
+
+    expect(await screen.findByText("AI service received: Add pagination")).toBeInTheDocument();
+  });
+
+  it("shows why planning failed", async () => {
+    fakeBackend({
+      "GET /api/health": healthy,
+      "GET /api/tasks": () =>
+        json([
+          makeTask({
+            status: "FAILED",
+            error: "AI service returned 503: Gemini rate limit reached; gave up after 3 attempts",
+          }),
+        ]),
+    });
+    renderApp();
+
+    expect(await screen.findByText(/Gemini rate limit reached/)).toBeInTheDocument();
   });
 
   it("lists a task the AI service could not take as FAILED", async () => {
