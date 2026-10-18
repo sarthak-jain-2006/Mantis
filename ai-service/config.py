@@ -4,8 +4,9 @@ from typing import Literal
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
 # All services share the .env at the repository root.
-ROOT_ENV = Path(__file__).resolve().parent.parent / ".env"
+ROOT_ENV = REPO_ROOT / ".env"
 
 
 class Settings(BaseSettings):
@@ -28,6 +29,11 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=30, gt=0, le=120)
     # How many times to try a call that was rate limited (HTTP 429) before giving up.
     llm_rate_limit_attempts: int = Field(default=3, ge=1, le=5)
+
+    # Each task edits its own copy of the repository under this folder (gitignored).
+    workspaces_dir: Path = REPO_ROOT / "workspaces"
+    # ripgrep, used by search_code. Set RG_PATH to the full path of rg.exe if it isn't on PATH.
+    rg_path: str = "rg"
 
     @model_validator(mode="after")
     def require_provider_key(self) -> "Settings":

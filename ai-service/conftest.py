@@ -9,7 +9,33 @@ os.environ["INTERNAL_TOKEN"] = TEST_TOKEN
 # Lets settings load. No test calls Gemini: they all use FakeLLM below.
 os.environ["GEMINI_API_KEY"] = "test-gemini-key"
 
-from schemas import ImplementationPlan  # noqa: E402  (needs the env vars above)
+import shutil  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
+
+from config import settings  # noqa: E402  (needs the env vars above)
+from schemas import ImplementationPlan  # noqa: E402
+
+SAMPLE_REPO = Path(__file__).resolve().parent.parent / "sample-repos" / "fastapi-shop"
+
+# search_code needs ripgrep; those tests are skipped on a machine without it.
+needs_rg = pytest.mark.skipif(shutil.which(settings.rg_path) is None, reason="ripgrep (rg) is not installed")
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    """A fresh copy of sample-repos/fastapi-shop for one test."""
+    from tools.workspace import create_workspace
+
+    return create_workspace(SAMPLE_REPO, "test-task", tmp_path / "workspaces")
+
+
+@pytest.fixture
+def registry(workspace):
+    from tools.registry import ToolRegistry
+
+    return ToolRegistry(workspace)
 
 SAMPLE_PLAN = ImplementationPlan(
     summary="Add limit/offset pagination to the products list endpoint.",
