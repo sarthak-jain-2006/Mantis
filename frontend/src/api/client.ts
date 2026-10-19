@@ -21,17 +21,50 @@ export interface Plan {
   needs_research: boolean;
 }
 
+// The Repository Analyst's findings. Mirrors AnalysisReport in ai-service/agents/analyst.py.
+export interface Analysis {
+  summary: string;
+  relevant_files: { path: string; reason: string }[];
+  test_files: string[];
+  test_command: string;
+  conventions: string[];
+}
+
+// What the Coder changed. The diff arrives when the run completes.
+export interface Changes {
+  summary: string;
+  notes: string[];
+  changed_files: { path: string; change: string }[];
+  diff?: string;
+  diff_truncated?: boolean;
+  diff_hash?: string;
+}
+
+export type Step = "planner" | "analyst" | "coder";
+
 export interface Task {
   id: string;
   projectId: string | null;
   request: string;
   status: TaskStatus;
-  // Phase 2: the plan and the model that wrote it. Tasks saved in Phase 1 hold { message } instead.
-  result: { plan?: Plan; model?: string; message?: string } | null;
+  // Which agent is working now; null when nothing is running.
+  currentStep: Step | null;
+  // Each step's output appears as soon as it is ready. Older tasks may hold only
+  // { plan } (Phase 2) or { message } (Phase 1).
+  result: { plan?: Plan; analysis?: Analysis; changes?: Changes; model?: string; message?: string } | null;
+  diffHash: string | null;
   error: string | null;
   createdAt: string;
   updatedAt: string;
   finishedAt: string | null;
+}
+
+// One thing a run did: a step starting or finishing, a tool call, the end of the run.
+export interface AgentEvent {
+  id: string;
+  type: "run_started" | "step_started" | "step_finished" | "tool_called" | "run_completed" | "run_failed";
+  payload: Record<string, unknown>;
+  createdAt: string;
 }
 
 export interface Health {
@@ -83,6 +116,12 @@ export async function listTasks(): Promise<Task[]> {
   const { res, body } = await request("/api/tasks");
   if (!res.ok) throw new ApiError(errorMessage(body, res.status), res.status);
   return body as Task[];
+}
+
+export async function listTaskEvents(taskId: string): Promise<AgentEvent[]> {
+  const { res, body } = await request(`/api/tasks/${taskId}/events`);
+  if (!res.ok) throw new ApiError(errorMessage(body, res.status), res.status);
+  return body as AgentEvent[];
 }
 
 export async function createTask(text: string): Promise<Task> {

@@ -42,7 +42,7 @@ export function TaskForm() {
           disabled={!text.trim() || mutation.isPending}
           className="shrink-0 rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
-          {mutation.isPending ? "Planning…" : "Submit task"}
+          {mutation.isPending ? "Submitting…" : "Submit task"}
         </button>
       </div>
     </form>
