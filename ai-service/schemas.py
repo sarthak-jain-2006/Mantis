@@ -43,9 +43,7 @@ class RunRequest(BaseModel):
     user_request: str = Field(min_length=1, max_length=4000)
 
 
-class RunResponse(BaseModel):
+class RunAccepted(BaseModel):
+    # The run continues in the background; results arrive at the backend as events (see runs.py).
     task_id: str
-    status: Literal["planned"]
-    plan: ImplementationPlan
-    # Which model produced the plan, so results can be compared across models later.
-    model: str
+    status: Literal["accepted"]

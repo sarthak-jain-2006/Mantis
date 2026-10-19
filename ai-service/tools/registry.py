@@ -106,8 +106,10 @@ class ToolCall:
 
 
 class ToolRegistry:
-    def __init__(self, workspace: Workspace):
+    def __init__(self, workspace: Workspace, listener: Callable[[ToolCall], None] | None = None):
         self.workspace = workspace
+        # Called with every ToolCall record, so a run can report each tool use as it happens.
+        self.listener = listener
 
     def tools_for(self, role: Role) -> list[Tool]:
         return [TOOLS[name] for name in sorted(ROLE_TOOLS.get(role, frozenset()))]
@@ -144,4 +146,6 @@ class ToolRegistry:
             duration_ms=round((time.perf_counter() - started) * 1000),
         )
         logger.info("tool %s by %s: %s (%d ms)", tool_name, role, "ok" if call.ok else f"refused: {error}", call.duration_ms)
+        if self.listener:
+            self.listener(call)
         return call

@@ -1,9 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import SAMPLE_PLAN, TEST_TOKEN, FakeLLM
-from llm import LLMError, LLMRateLimitError, LLMTimeoutError, LLMUnavailableError, get_llm
+from conftest import TEST_TOKEN
 from main import app
+from runs import get_runner
 
 client = TestClient(app)
 
@@ -11,13 +11,23 @@ VALID_BODY = {"task_id": "task-1", "user_request": "Add pagination to /products"
 AUTH = {"X-Internal-Token": TEST_TOKEN}
 
 
-@pytest.fixture
-def fake_llm():
-    """Replace the real Gemini provider with a fake for one test."""
+class FakeRunner:
+    def __init__(self, accept=True):
+        self.accept = accept
+        self.submitted = []
 
-    def use(*replies):
-        fake = FakeLLM(*replies)
-        app.dependency_overrides[get_llm] = lambda: fake
+    def submit(self, task_id, user_request):
+        self.submitted.append((task_id, user_request))
+        return self.accept
+
+
+@pytest.fixture
+def runner():
+    """Replace the real runner (threads, Gemini, backend) with one that only records submissions."""
+
+    def use(accept=True):
+        fake = FakeRunner(accept)
+        app.dependency_overrides[get_runner] = lambda: fake
         return fake
 
     yield use
@@ -30,57 +40,39 @@ def test_health_is_public():
     assert response.json() == {"status": "ok", "service": "ai-service"}
 
 
-def test_runs_rejects_missing_token(fake_llm):
-    fake = fake_llm(SAMPLE_PLAN)
+def test_runs_rejects_missing_token(runner):
+    fake = runner()
     response = client.post("/runs", json=VALID_BODY)
     assert response.status_code == 401
-    assert fake.calls == []  # rejected before the model is called
+    assert fake.submitted == []  # rejected before anything starts
 
 
-def test_runs_rejects_wrong_token(fake_llm):
-    fake_llm(SAMPLE_PLAN)
+def test_runs_rejects_wrong_token(runner):
+    fake = runner()
     response = client.post("/runs", json=VALID_BODY, headers={"X-Internal-Token": "wrong"})
     assert response.status_code == 401
+    assert fake.submitted == []
 
 
-def test_runs_returns_a_plan(fake_llm):
-    fake = fake_llm(SAMPLE_PLAN)
+def test_runs_starts_the_run_and_answers_at_once(runner):
+    fake = runner()
     response = client.post("/runs", json=VALID_BODY, headers=AUTH)
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "task_id": "task-1",
-        "status": "planned",
-        "plan": SAMPLE_PLAN.model_dump(),
-        "model": "fake-model",
-    }
-    # The user's text reached the model.
-    assert "Add pagination to /products" in fake.calls[0][-1].content
+    assert response.status_code == 202
+    assert response.json() == {"task_id": "task-1", "status": "accepted"}
+    assert fake.submitted == [("task-1", "Add pagination to /products")]
 
 
-def test_runs_rejects_empty_request(fake_llm):
-    fake_llm(SAMPLE_PLAN)
+def test_runs_refuses_a_task_that_is_already_running(runner):
+    runner(accept=False)
+    response = client.post("/runs", json=VALID_BODY, headers=AUTH)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "This task is already running"
+
+
+def test_runs_rejects_empty_request(runner):
+    fake = runner()
     body = {"task_id": "task-1", "user_request": ""}
     response = client.post("/runs", json=body, headers=AUTH)
     assert response.status_code == 422
-
-
-@pytest.mark.parametrize(
-    ("error", "status_code", "detail"),
-    [
-        (LLMRateLimitError("429"), 503, "Gemini rate limit reached; gave up after 3 attempts"),
-        (LLMUnavailableError("Could not reach Gemini"), 503, "Could not reach Gemini"),
-        (LLMTimeoutError("Gemini did not answer within 30s"), 504, "Gemini did not answer within 30s"),
-        (LLMError("Gemini rejected the request: API key not valid"), 502, "Gemini rejected the request: API key not valid"),
-    ],
-)
-def test_runs_reports_model_failures(fake_llm, monkeypatch, error, status_code, detail):
-    # Skip the rate-limit back-off so the test doesn't wait.
-    monkeypatch.setattr("llm.time.sleep", lambda _: None)
-    fake_llm(error, error, error)
-
-    response = client.post("/runs", json=VALID_BODY, headers=AUTH)
-
-    assert response.status_code == status_code
-    # The reason travels to the backend, which shows it on the failed task.
-    assert response.json()["detail"] == detail
+    assert fake.submitted == []

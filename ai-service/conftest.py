@@ -8,6 +8,8 @@ TEST_TOKEN = "test-token-" + "x" * 32
 os.environ["INTERNAL_TOKEN"] = TEST_TOKEN
 # Lets settings load. No test calls Gemini: they all use FakeLLM below.
 os.environ["GEMINI_API_KEY"] = "test-gemini-key"
+# Fake models answer instantly; a real per-minute limit would only slow the tests down.
+os.environ["LLM_REQUESTS_PER_MINUTE"] = "0"
 
 import shutil  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -15,6 +17,7 @@ from pathlib import Path  # noqa: E402
 import pytest  # noqa: E402
 
 from config import settings  # noqa: E402  (needs the env vars above)
+from llm import AssistantTurn, ToolRequest  # noqa: E402
 from schemas import ImplementationPlan  # noqa: E402
 
 SAMPLE_REPO = Path(__file__).resolve().parent.parent / "sample-repos" / "fastapi-shop"
@@ -37,6 +40,7 @@ def registry(workspace):
 
     return ToolRegistry(workspace)
 
+
 SAMPLE_PLAN = ImplementationPlan(
     summary="Add limit/offset pagination to the products list endpoint.",
     subtasks=[
@@ -51,15 +55,25 @@ SAMPLE_PLAN = ImplementationPlan(
 )
 
 
+def ask(*calls: tuple[str, dict]) -> AssistantTurn:
+    """A scripted model turn requesting these tool calls, e.g. ask(("read_file", {"path": "a.py"}))."""
+    return AssistantTurn(tool_calls=tuple(ToolRequest(f"call-{i}", name, args) for i, (name, args) in enumerate(calls)), text="")
+
+
 class FakeLLM:
-    """Stands in for a real model. Each call takes the next item from `replies`:
-    a value is returned, an exception is raised."""
+    """Stands in for a real model.
+
+    generate() takes the next item from `replies`; call_tools() the next from `turns`.
+    A value is returned, an exception is raised.
+    """
 
     model_name = "fake-model"
 
-    def __init__(self, *replies):
+    def __init__(self, *replies, turns=()):
         self.replies = list(replies)
+        self.turns = list(turns)
         self.calls = []
+        self.tool_conversations = []
 
     def generate(self, messages, schema):
         self.calls.append(messages)
@@ -67,3 +81,26 @@ class FakeLLM:
         if isinstance(reply, Exception):
             raise reply
         return reply
+
+    def call_tools(self, messages, tools):
+        self.tool_conversations.append((list(messages), [t.name for t in tools]))
+        turn = self.turns.pop(0)
+        if isinstance(turn, Exception):
+            raise turn
+        return turn
+
+
+class RecordingSink:
+    """Collects run events instead of sending them to the backend."""
+
+    def __init__(self):
+        self.events = []
+
+    def emit(self, event_type, **payload):
+        self.events.append((event_type, payload))
+
+    def types(self):
+        return [t for t, _ in self.events]
+
+    def last(self, event_type):
+        return next(p for t, p in reversed(self.events) if t == event_type)
