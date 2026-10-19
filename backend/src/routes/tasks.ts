@@ -25,15 +25,12 @@ export function taskRouter({ prisma, aiService }: AppDeps): Router {
     });
 
     try {
-      const run = await aiService.startRun(task.id, task.request);
-      // Phase 2: the AI service returns a plan, saved as the task's result. Nothing runs
-      // after planning yet; from Phase 4 the agent graph carries on from here and moves
-      // the task through its states. This request waits for the plan (a few seconds).
-      const updated = await prisma.task.update({
-        where: { id: task.id },
-        data: { status: "RUNNING", result: run },
-      });
-      res.status(201).json(updated);
+      // Starts Planner -> Analyst -> Coder in the background and returns at once. The AI service
+      // then reports progress to /internal/tasks/:id/events, which moves the task through its states.
+      await aiService.startRun(task.id, task.request);
+      // Read back rather than reuse `task`: the first events may already have arrived.
+      const current = await prisma.task.findUniqueOrThrow({ where: { id: task.id } });
+      res.status(201).json(current);
     } catch (err) {
       if (!(err instanceof AiServiceError)) throw err;
       req.log.warn({ taskId: task.id, err: err.message }, "AI service call failed");
@@ -59,6 +56,23 @@ export function taskRouter({ prisma, aiService }: AppDeps): Router {
       return;
     }
     res.json(task);
+  });
+
+  // Everything the run did so far, oldest first: steps, tool calls, results.
+  router.get("/api/tasks/:id/events", async (req, res) => {
+    const { id } = TaskIdParams.parse(req.params);
+    const task = await prisma.task.findUnique({ where: { id }, select: { id: true } });
+    if (!task) {
+      res.status(404).json({ error: "Task not found" });
+      return;
+    }
+    const events = await prisma.agentEvent.findMany({
+      where: { taskId: id },
+      orderBy: { createdAt: "asc" },
+      take: 500,
+      select: { id: true, type: true, payload: true, createdAt: true },
+    });
+    res.json(events);
   });
 
   return router;

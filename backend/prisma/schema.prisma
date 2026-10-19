@@ -37,15 +37,33 @@ model Task {
   // Optional until project selection lands in Phase 3.
   projectId  String?    @map("project_id") @db.Uuid
   project    Project?   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  request    String
-  status     TaskStatus @default(QUEUED)
-  result     Json?
-  error      String?
-  createdAt  DateTime   @default(now()) @map("created_at")
-  updatedAt  DateTime   @updatedAt @map("updated_at")
-  finishedAt DateTime?  @map("finished_at")
+  request     String
+  status      TaskStatus   @default(QUEUED)
+  // Which agent is working right now: planner, analyst or coder. Null when nothing is running.
+  currentStep String?      @map("current_step")
+  result      Json?
+  // SHA-256 of the proposed diff. Approvals will be bound to it (Phase 7).
+  diffHash    String?      @map("diff_hash")
+  error       String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  finishedAt  DateTime?    @map("finished_at")
+  events      AgentEvent[]
 
   @@index([projectId])
   @@index([createdAt])
   @@map("tasks")
+}
+
+// Everything a run did, in order: steps, tool calls, results, failures. Sent by the AI service.
+model AgentEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  taskId    String   @map("task_id") @db.Uuid
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  type      String
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([taskId, createdAt])
+  @@map("agent_events")
 }

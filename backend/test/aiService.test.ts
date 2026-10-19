@@ -10,45 +10,34 @@ function respondWith(body: unknown, status = 200) {
   return fetchMock;
 }
 
-const PLANNED = {
-  task_id: "task-1",
-  status: "planned",
-  plan: {
-    summary: "Add pagination",
-    subtasks: ["Find the endpoint"],
-    acceptance_criteria: ["Tests pass"],
-    constraints: [],
-    needs_research: false,
-  },
-  model: "gemini-flash-latest",
-};
+const ACCEPTED = { task_id: "task-1", status: "accepted" };
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe("startRun", () => {
-  it("sends the task with the internal token and returns the plan", async () => {
-    const fetchMock = respondWith(PLANNED);
+  it("sends the task with the internal token and returns once the run is accepted", async () => {
+    const fetchMock = respondWith(ACCEPTED, 202);
 
     const run = await client.startRun("task-1", "Add pagination");
 
-    expect(run.plan.summary).toBe("Add pagination");
+    expect(run).toEqual(ACCEPTED);
     const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
     expect(String(url)).toBe("http://ai.test/runs");
     expect((init.headers as Record<string, string>)["X-Internal-Token"]).toBe("t".repeat(40));
   });
 
   it("keeps the AI service's reason when it fails", async () => {
-    respondWith({ detail: "Gemini rate limit reached; gave up after 3 attempts" }, 503);
+    respondWith({ detail: "This task is already running" }, 409);
 
     await expect(client.startRun("task-1", "x")).rejects.toThrow(
-      "AI service returned 503: Gemini rate limit reached; gave up after 3 attempts",
+      "AI service returned 409: This task is already running",
     );
   });
 
-  it("rejects a reply that is not a plan", async () => {
-    respondWith({ ...PLANNED, plan: { summary: "missing fields" } });
+  it("rejects a reply with an unexpected shape", async () => {
+    respondWith({ task_id: "task-1", status: "planned" }, 202);
 
     await expect(client.startRun("task-1", "x")).rejects.toThrow("unexpected response shape");
   });

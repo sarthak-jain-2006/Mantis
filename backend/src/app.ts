@@ -6,11 +6,14 @@ import { ZodError } from "zod";
 import type { PrismaClient } from "../generated/prisma/client.js";
 import type { AiServiceClient } from "./clients/aiService.js";
 import { healthRouter } from "./routes/health.js";
+import { internalRouter } from "./routes/internal.js";
 import { taskRouter } from "./routes/tasks.js";
 
 export interface AppDeps {
   prisma: PrismaClient;
   aiService: AiServiceClient;
+  // Shared secret the AI service sends when it reports run events.
+  internalToken: string;
 }
 
 export interface BuildAppOptions {
@@ -51,6 +54,10 @@ export function buildApp({ deps, frontendOrigin, logger = true }: BuildAppOption
 
   // Only the dashboard may call this API from a browser.
   app.use(cors({ origin: frontendOrigin }));
+
+  // Events from the AI service. A finished run carries its whole diff, so these get a larger
+  // body limit. Mounted before the general parser below, which then leaves the body alone.
+  app.use("/internal", express.json({ limit: "2mb" }), internalRouter(deps));
 
   // Parse JSON bodies; reject anything over 100 KB.
   app.use(express.json({ limit: "100kb" }));

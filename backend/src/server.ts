@@ -7,6 +7,7 @@ const app = buildApp({
   deps: {
     prisma,
     aiService: createAiServiceClient({ baseUrl: env.AI_SERVICE_URL, token: env.INTERNAL_TOKEN }),
+    internalToken: env.INTERNAL_TOKEN,
   },
   frontendOrigin: env.FRONTEND_ORIGIN,
 });

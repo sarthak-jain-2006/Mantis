@@ -7,25 +7,16 @@ import { AiServiceError, type AiServiceClient } from "../src/clients/aiService.j
 import { prisma } from "../src/db.js";
 
 // Integration tests: real Postgres (docker compose), fake AI service.
-type FakeAiService = AiServiceClient & { healthy: boolean; fail: boolean };
+type FakeAiService = AiServiceClient & { healthy: boolean; fail: boolean; started: string[] };
 
 const fakeAi: FakeAiService = {
   healthy: true,
   fail: false,
-  async startRun(taskId: string, userRequest: string) {
+  started: [],
+  async startRun(taskId: string) {
     if (this.fail) throw new AiServiceError("AI service unreachable: connection refused");
-    return {
-      task_id: taskId,
-      status: "planned" as const,
-      plan: {
-        summary: `Plan for: ${userRequest}`,
-        subtasks: ["Find the endpoint", "Add the parameters", "Write tests"],
-        acceptance_criteria: ["Existing tests still pass"],
-        constraints: [],
-        needs_research: false,
-      },
-      model: "fake-model",
-    };
+    this.started.push(taskId);
+    return { task_id: taskId, status: "accepted" as const };
   },
   async isHealthy() {
     return this.healthy;
@@ -37,7 +28,7 @@ const createdIds: string[] = [];
 
 beforeAll(() => {
   app = buildApp({
-    deps: { prisma, aiService: fakeAi },
+    deps: { prisma, aiService: fakeAi, internalToken: "i".repeat(40) },
     frontendOrigin: "http://localhost:5173",
     logger: false,
   });
@@ -49,19 +40,18 @@ afterAll(async () => {
 });
 
 describe("POST /api/tasks", () => {
-  it("saves the task and stores the plan from the AI service", async () => {
+  it("saves the task and starts a run for it", async () => {
     fakeAi.fail = false;
     const res = await request(app).post("/api/tasks").send({ request: "Add pagination" });
     createdIds.push(res.body.id);
 
     expect(res.status).toBe(201);
-    expect(res.body.status).toBe("RUNNING");
-    expect(res.body.result.plan.summary).toBe("Plan for: Add pagination");
-    expect(res.body.result.model).toBe("fake-model");
+    // QUEUED until the AI service reports that the run has started.
+    expect(res.body.status).toBe("QUEUED");
+    expect(fakeAi.started).toContain(res.body.id);
 
     const fromDb = await prisma.task.findUnique({ where: { id: res.body.id } });
     expect(fromDb?.request).toBe("Add pagination");
-    expect(fromDb?.result).toMatchObject({ plan: { subtasks: ["Find the endpoint", "Add the parameters", "Write tests"] } });
   });
 
   it("marks the task FAILED when the AI service is down", async () => {
@@ -99,6 +89,25 @@ describe("GET /api/tasks/:id", () => {
   it("returns 400 for an id that is not a UUID", async () => {
     const res = await request(app).get("/api/tasks/not-a-uuid");
     expect(res.status).toBe(400);
+  });
+});
+
+describe("GET /api/tasks/:id/events", () => {
+  it("lists a task's events oldest first", async () => {
+    const task = await prisma.task.create({ data: { request: "Add pagination" } });
+    createdIds.push(task.id);
+    await prisma.agentEvent.create({ data: { taskId: task.id, type: "run_started", payload: {} } });
+    await prisma.agentEvent.create({ data: { taskId: task.id, type: "step_started", payload: { step: "planner" } } });
+
+    const res = await request(app).get(`/api/tasks/${task.id}/events`);
+    expect(res.status).toBe(200);
+    expect(res.body.map((e: { type: string }) => e.type)).toEqual(["run_started", "step_started"]);
+    expect(res.body[1].payload).toEqual({ step: "planner" });
+  });
+
+  it("returns 404 for an unknown task", async () => {
+    const res = await request(app).get(`/api/tasks/${randomUUID()}/events`);
+    expect(res.status).toBe(404);
   });
 });
 
